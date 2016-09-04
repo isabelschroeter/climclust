@@ -18,8 +18,8 @@ setwd("E:/climate_classification")
 s <- getData("worldclim", var="bio", res=10)
 
 # cali border
-b <- readOGR("E:/california_phylomodelling/Geographic_Subdivisions_of_California_TJMII_v2_060415",
-             "Geographic_Subdivisions_of_California_TJMII_v2_060415")
+b <- getData("GADM", country="USA", level=1)
+b <- b[b$NAME_1=="California",]
 b <- spTransform(b, crs(s))
 
 # munge
@@ -29,27 +29,29 @@ r <- subset(r, c("bio1", "bio12"))
 d <- as.data.frame(rasterToPoints(r))
 d$bio12 <- log(d$bio12)
 
+climate <- scale(d[,c("bio1", "bio12")])
+
 # continuous colors
-clrs <- d[,c("bio1", "bio12")] %>%
-      scale() %>%
-      prcomp()
-d[,c("red", "green", "blue")] <- clrs$x %>%
+d[,c("red", "green", "blue")] <- prcomp(climate)$x %>%
       colorwheel2d() %>%
       col2rgb() %>%
       t()
 
-for(k in c(2:5, 10, 15, 30)){
+
+
+# various clustering algorithms
+for(method in c("kmeans", 
+                "ward.D", "ward.D2", "single", "complete", "average", "mcquitty", "median", "centroid",
+                "skater_gabriel", "skater_30nn")){
       
-      for(method in c("kmeans", #"skater", 
-                      "ward.D", "ward.D2", 
-                      "single", "complete", "average", "mcquitty", "median", "centroid")){
-            
+      # various numbers of clusters
+      for(k in c(2:5, 10, 15, 30)){
             
             # CLUSTERING
             
             if(method=="kmeans"){
-                  cluster <- kmeans(scale(d[,c("bio1", "bio12")]), k)$cluster
-            } else if(method=="skater"){
+                  cluster <- kmeans(climate, k)$cluster
+            } else if(method=="skater_gabriel"){
                   
                   # construct connectivity graph 
                   gabn <- gabrielneigh(as.matrix(d[,c("x", "y")]), nnmult=4)
@@ -57,14 +59,35 @@ for(k in c(2:5, 10, 15, 30)){
                   #plot(nb, coords, col="red", pch=16, cex=.5)
                   
                   # weight graph edges by climate dissimiliarity
-                  costs <- nbcosts(nb, scale(as.matrix(d[,c("bio1", "bio12")])))
+                  costs <- nbcosts(nb, climate)
                   nbw <- nb2listw(nb, costs)
                   
                   # grow minimum spanning tree within connectivity graph
                   mst <- mstree(nbw, ini=1)
                   
                   # partition tree into clusters
-                  sk <- skater(mst[,1:2], scale(as.matrix(d[,c("bio1", "bio12")])), 
+                  sk <- skater(mst[,1:2], climate, 
+                               method="euclidean", 
+                               ncuts=k-1)
+                  cluster <- sk$groups
+            } else if(method=="skater_30nn"){
+                  
+                  # construct connectivity graph 
+                  knn <- knearneigh(as.matrix(d[,c("x", "y")]), k=30)
+                  nb <- knn2nb(knn)
+                  #gabn <- gabrielneigh(as.matrix(d[,c("x", "y")]), nnmult=4)
+                  #nb <- graph2nb(gabn, sym=T)
+                  #plot(nb, coords, col="red", pch=16, cex=.5)
+                  
+                  # weight graph edges by climate dissimiliarity
+                  costs <- nbcosts(nb, climate)
+                  nbw <- nb2listw(nb, costs)
+                  
+                  # grow minimum spanning tree within connectivity graph
+                  mst <- mstree(nbw, ini=1)
+                  
+                  # partition tree into clusters
+                  sk <- skater(mst[,1:2], climate, 
                                method="euclidean", 
                                ncuts=k-1)
                   cluster <- sk$groups
