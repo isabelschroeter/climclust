@@ -1,6 +1,9 @@
 
 
+# install colormap package
+devtools::install_github("matthewkling/colormap")
 
+# load libraries
 library(colormap)
 library(ggplot2)
 library(raster)
@@ -11,8 +14,8 @@ library(gridExtra)
 library(grid)
 library(spdep)
 
-setwd("E:/climate_classification")
-
+# working directory
+#setwd("E:/climate_classification")
 
 # climate data
 s <- getData("worldclim", var="bio", res=10)
