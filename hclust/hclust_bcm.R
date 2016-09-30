@@ -33,10 +33,21 @@ col3d <- colors3d(pc) %>%
         col2rgb() %>%
         t()
 
+# continuous color plot
+p <- ggplot(as.data.frame(v), aes(x, y)) + 
+        geom_raster(fill=rgb(col3d, maxColorValue=255)) +
+        ggmap::theme_nothing() +
+        coord_fixed()
+png(paste0("hclust/continuous.png"), width=5, height=6, units="in", res=1000)
+plot(p)
+dev.off()
+
+
+
 # clustering
 tree <- hclust.vector(v[px,3:6], method="ward")
 
-for(k in c(5, 10, 15, 20)){
+for(k in c(2:5, 10, 15, 20)){
         
         # cut tree into specified number of clusters
         clust <- cutree(tree, k)
