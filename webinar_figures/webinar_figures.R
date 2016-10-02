@@ -22,6 +22,7 @@ r <- lapply(files[2:5], readRDS) %>%
 
 # log-transform ppt
 r[[4]] <- log(r[[4]])
+names(r) <- c("cwd", "djf", "jja", "ppt")
 
 # convert raster to matrix
 v <- na.omit(cbind(coordinates(r), scale(values(r))))
@@ -52,9 +53,17 @@ dev.off()
 pr <- readOGR("preservation_ranch", "PreservationRanch_boundary")
 prd <- broom::tidy(pr)
 
-# coastal conservancy shapefile
+# coastal conservancy acquisitions shapefile
 cc <- readOGR("Acquisitions", "projects_scc_2016_07_13_10_40_28")
 ccd <- broom::tidy(cc)
+
+# coastal jusrisdiction shapefile
+cj <- readOGR("SCCJurisdiction2015", "SCCJurisdiction2015_Dissolve")
+cj <- spTransform(cj, crs(cc))
+cj <- crop(cj, r)
+cjd <- broom::tidy(cj)
+
+
 
 
 ######   build state-level hclust tree   ##########
@@ -67,26 +76,31 @@ tree <- hclust.vector(v[px,3:6], method="ward")
 
 # histogram of percent land area per type, for state vs coastal conservancy, at k=20
 
+# cut tree into clusters and transfer to rasters
 clust <- cutree(tree, 20)
 cluster <- clust[nn$nn.index]
-
-ccr <- rasterize(cc, r[[1]]) %>% reclassify(c(-1, Inf, 1))
 kr <- r[[1]]
 kr[!is.na(values(kr))] <- cluster
-kr <- stack(kr, ccr)
-names(kr) <- c("cluster", "conservancy")
 
-cd <- as.data.frame(values(kr)) %>%
+# rasterize shapefiles and stack with clusters
+ccr <- rasterize(cc, r[[1]]) %>% reclassify(c(-1, Inf, 1))
+cjr <- rasterize(cj, r[[1]]) %>% reclassify(c(-1, Inf, 1))
+kr <- stack(kr, ccr, cjr)
+names(kr) <- c("cluster", "conservancy", "coastal")
+kr <- stack(kr, r)
+
+# create conservancy vs all partitions, by double-adding conservancy lands
+cd1 <- as.data.frame(rasterToPoints(kr)) %>%
         filter(!is.na(cluster))
-ccdd <- filter(cd, !is.na(conservancy))
-cd$conservancy <- 0
-cd <- rbind(cd, ccdd)
-
+ccdd <- filter(cd1, !is.na(conservancy))
+cd1$conservancy <- 0
+cd <- rbind(cd1, ccdd) 
 
 cdh <- group_by(cd, conservancy, cluster) %>%
-        summarize(n=n()) %>%
+        summarize(n=n(), coastal=length(na.omit(coastal))) %>%
         group_by(conservancy) %>%
-        mutate(p=n/sum(n))
+        mutate(p=n/sum(n)) %>%
+        filter(coastal > 0) # exclude climate types entirely outside the coastal region
 
 cdo <- cd %>%
         group_by(cluster) %>%
@@ -96,18 +110,73 @@ cdo <- cd %>%
 cdh$cluster <- factor(cdh$cluster, levels=cdo$cluster)
 cdh <- arrange(cdh, cluster, conservancy)
 
+# expand
+cdh <- expand.grid(cluster=unique(cdh$cluster),
+            conservancy=unique(cdh$conservancy)) %>%
+        left_join(cdh)
 
 
-p <- ggplot(cdh, aes(cluster, p, group=conservancy, fill=factor(conservancy, labels=c("state", "conservancy")))) +
+# reference map
+p <- ggplot() +
+        geom_raster(data=as.data.frame(rasterToPoints(r[[1]])),
+                    aes(x,y), fill="gray85") +
+        geom_polygon(data=cjd, aes(long, lat, group=group), 
+                     fill="darkseagreen", color=NA) +
+        geom_polygon(data=ccd, aes(long, lat, group=group), 
+                     fill="darkgreen", color="darkgreen") +
+        ggmap::theme_nothing() +
+        coord_fixed() +
+        xlim(extent(r)[c(1,2)]) +
+        ylim(extent(r)[c(3,4)])
+ggsave("reference_map.png", p, width=6, height=9, units="in")
+
+
+# histogram
+p <- ggplot(cdh, aes(cluster, p, group=conservancy, 
+                     fill=factor(conservancy, labels=c("state", "conservancy")))) +
         geom_bar(stat="identity", position="dodge", width=.75) +
-        scale_fill_manual(values=c("black", "red")) +
+        scale_fill_manual(values=c("gray", "darkgreen")) +
         theme_minimal() +
         labs(y="proportion of of total land within domain",
-             fill="domain") +
+             fill="domain",
+             x="coastal climate type (sorted by ascending JJA)") +
         theme(legend.position=c(.5,.9))
 ggsave("histogram.png", p, width=9, height=6, units="in")
 
 
+# coastal cluster map
+clrs <- distant_colors(length(unique(cdh$cluster)))
+eb <- element_blank()
+p <- ggplot(filter(cd1, cluster %in% cdh$cluster)) +
+        geom_raster(aes(x, y, fill=factor(cluster, levels=unique(cdh$cluster)))) +
+        theme(panel.background=eb, panel.grid=eb,
+              axis.text=eb, axis.title=eb, axis.ticks=eb) +
+        scale_fill_manual(values=clrs) +
+        labs(fill="coastal\ncluster")
+ggsave("coastal_cluster_map.png", p, width=6, height=6, units="in")
+
+
+# histogram colored to match map
+p <- ggplot() + 
+        geom_bar(data=cdh, 
+                 aes(cluster, p, fill=factor(cluster, levels=unique(cdh$cluster)),
+                     group=conservancy),
+                 stat="identity", position="dodge", width=.9,
+                 color=NA) +
+        geom_bar(data=cdh, 
+                 aes(cluster, p,
+                     alpha=factor(conservancy, labels=c("state", "conservancy")), 
+                     group=conservancy),
+                 stat="identity", position="dodge", width=.9, 
+                 fill="black", color=NA) +
+        scale_fill_manual(values=clrs, guide=F) +
+        scale_alpha_manual(values=c(0, 1)) +
+        theme_minimal() +
+        labs(y="proportion of of total land within domain",
+             alpha="domain",
+             x="coastal climate type (sorted by ascending JJA)") +
+        theme(legend.position=c(.5,.9))
+ggsave("histogram_colored.png", p, width=9, height=6, units="in")
 
 
 
