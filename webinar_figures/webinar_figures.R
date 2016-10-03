@@ -97,10 +97,12 @@ cd1$conservancy <- 0
 cd <- rbind(cd1, ccdd) 
 
 cdh <- group_by(cd, conservancy, cluster) %>%
+        filter(!is.na(coastal)) %>%
         summarize(n=n(), coastal=length(na.omit(coastal))) %>%
         group_by(conservancy) %>%
-        mutate(p=n/sum(n)) %>%
-        filter(coastal > 0) # exclude climate types entirely outside the coastal region
+        mutate(p=n/sum(n))# %>%
+        #filter(coastal > 0) # exclude climate types entirely outside the coastal region
+coastal_types <- unique(cdh$cluster[cdh$coastal!=0])
 
 cdo <- cd %>%
         group_by(cluster) %>%
@@ -114,7 +116,7 @@ cdh <- arrange(cdh, cluster, conservancy)
 cdh <- expand.grid(cluster=unique(cdh$cluster),
             conservancy=unique(cdh$conservancy)) %>%
         left_join(cdh)
-
+cdh$cluster <- factor(cdh$cluster, levels=cdo$cluster)
 
 # reference map
 p <- ggplot() +
@@ -127,39 +129,47 @@ p <- ggplot() +
         ggmap::theme_nothing() +
         coord_fixed() +
         xlim(extent(r)[c(1,2)]) +
-        ylim(extent(r)[c(3,4)])
+        ylim(extent(r)[c(3,4)]) +
+        annotate(geom="text", label=c("SCC Jurisdiction", "SCC Acquisitions"),
+                 x=150000, y=c(250000, 200000), color=c("darkseagreen", "darkgreen"),
+                 size=6, hjust=0, fontface="bold")
 ggsave("reference_map.png", p, width=6, height=9, units="in")
 
 
 # histogram
-p <- ggplot(cdh, aes(cluster, p, group=conservancy, 
+p <- ggplot(filter(cdh, cluster %in% coastal_types), aes(cluster, p, group=conservancy, 
                      fill=factor(conservancy, labels=c("state", "conservancy")))) +
-        geom_bar(stat="identity", position="dodge", width=.75) +
+        geom_bar(stat="identity", position="dodge", width=.9) +
         scale_fill_manual(values=c("gray", "darkgreen")) +
         theme_minimal() +
+        scale_y_continuous(breaks=seq(0, 1, .1)) +
         labs(y="proportion of of total land within domain",
              fill="domain",
-             x="coastal climate type (sorted by ascending JJA)") +
+             x="climate type (coastal types only, sorted by ascending JJA)") +
         theme(legend.position=c(.5,.9))
 ggsave("histogram.png", p, width=9, height=6, units="in")
+ggsave("histogram_tall.png", p, width=9, height=16, units="in")
 
 
 # coastal cluster map
-clrs <- distant_colors(length(unique(cdh$cluster)))
+#clrs <- distant_colors(length(unique(cdh$cluster)))
+clrs <- distant_colors(length(unique(cd$cluster)))
 eb <- element_blank()
-p <- ggplot(filter(cd1, cluster %in% cdh$cluster)) +
-        geom_raster(aes(x, y, fill=factor(cluster, levels=unique(cdh$cluster)))) +
+p <- ggplot(cd) +
+        geom_raster(aes(x, y, fill=factor(cluster, levels=cdo$cluster))) +
+        geom_polygon(data=cjd, aes(long, lat, group=group), 
+                     fill=NA, color="black") +
         theme(panel.background=eb, panel.grid=eb,
               axis.text=eb, axis.title=eb, axis.ticks=eb) +
         scale_fill_manual(values=clrs) +
-        labs(fill="coastal\ncluster")
+        labs(fill="climate\ntype")
 ggsave("coastal_cluster_map.png", p, width=6, height=6, units="in")
 
 
 # histogram colored to match map
 p <- ggplot() + 
         geom_bar(data=cdh, 
-                 aes(cluster, p, fill=factor(cluster, levels=unique(cdh$cluster)),
+                 aes(cluster, p, fill=cluster,
                      group=conservancy),
                  stat="identity", position="dodge", width=.9,
                  color=NA) +
@@ -169,14 +179,17 @@ p <- ggplot() +
                      group=conservancy),
                  stat="identity", position="dodge", width=.9, 
                  fill="black", color=NA) +
-        scale_fill_manual(values=clrs, guide=F) +
+        scale_fill_manual(values=clrs[unique(cd$cluster) %in% coastal_types], 
+                          guide=F) +
         scale_alpha_manual(values=c(0, 1)) +
         theme_minimal() +
+        scale_y_continuous(breaks=seq(0, 1, .1)) +
         labs(y="proportion of of total land within domain",
              alpha="domain",
-             x="coastal climate type (sorted by ascending JJA)") +
+             x="climate type (coastal types only, sorted by ascending JJA)") +
         theme(legend.position=c(.5,.9))
 ggsave("histogram_colored.png", p, width=9, height=6, units="in")
+ggsave("histogram_colored_tall.png", p, width=9, height=16, units="in")
 
 
 
